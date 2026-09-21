@@ -9,7 +9,6 @@ from src.parser import extract_text
 from src.jd_extractor import JDExtractor
 from src.resume_processor import ResumeProcessor
 from src.matching.pipeline import MatchingPipeline
-from evaluation.evaluate import evaluate
 
 
 # ============================================================
@@ -176,6 +175,7 @@ def local_jd_extraction(jd_text: str) -> dict:
         if skill.lower() in lower_text:
 
             if skill not in required_skills:
+
                 required_skills.append(skill)
 
     # --------------------------------------------------------
@@ -324,7 +324,6 @@ def local_jd_extraction(jd_text: str) -> dict:
                 )
 
     # Remove section headings accidentally captured
-
     section_words = [
         "requirements",
         "required skills",
@@ -347,7 +346,6 @@ def local_jd_extraction(jd_text: str) -> dict:
 
     # If bullet extraction produced nothing, create
     # requirement entries from detected skills.
-
     if not requirements:
 
         for skill in required_skills:
@@ -357,7 +355,6 @@ def local_jd_extraction(jd_text: str) -> dict:
             )
 
     # Limit requirement count to avoid noisy fallback data.
-
     requirements = requirements[:30]
 
     # --------------------------------------------------------
@@ -429,6 +426,7 @@ def extract_jd_with_fallback(jd_text: str):
         )
 
         if not gemini_error:
+
             raise
 
         jd_data = local_jd_extraction(
@@ -851,154 +849,6 @@ if "all_jd_results" in st.session_state:
         )
 
         # ====================================================
-        # AUTOMATIC PROXY EVALUATION
-        # ====================================================
-        # No manual relevance labels are required.
-        #
-        # A proxy relevance score is generated from signals
-        # already produced by the matching pipeline:
-        #
-        # - requirement coverage
-        # - skill coverage
-        # - structured filter score
-        #
-        # These metrics are proxy evaluation metrics and are
-        # not human-labeled ground-truth evaluation.
-
-        ranked_resume_ids = [
-            result["resume_id"]
-            for result in results
-        ]
-
-        proxy_relevance_map = {}
-
-        for result in results:
-
-            skill_coverage = (
-                float(
-                    result.get(
-                        "skill_coverage",
-                        0.0
-                    )
-                ) / 100.0
-            )
-
-            matched_requirements = result.get(
-                "matched_requirements",
-                []
-            )
-
-            unmatched_requirements = result.get(
-                "unmatched_requirements",
-                []
-            )
-
-            total_requirements = (
-                len(matched_requirements)
-                + len(unmatched_requirements)
-            )
-
-            if total_requirements > 0:
-
-                requirement_coverage = (
-                    len(matched_requirements)
-                    / total_requirements
-                )
-
-            else:
-
-                requirement_coverage = (
-                    skill_coverage
-                )
-
-            filter_score = float(
-                result.get(
-                    "filter_score",
-                    0.0
-                )
-            )
-
-            # IMPORTANT:
-            # This proxy does not directly use final_score.
-            # It uses underlying matching signals instead.
-
-            proxy_score = (
-                0.45 * requirement_coverage
-                + 0.35 * skill_coverage
-                + 0.20 * filter_score
-            )
-
-            if proxy_score >= 0.75:
-
-                relevance = 3
-
-            elif proxy_score >= 0.50:
-
-                relevance = 2
-
-            elif proxy_score >= 0.25:
-
-                relevance = 1
-
-            else:
-
-                relevance = 0
-
-            proxy_relevance_map[
-                result["resume_id"]
-            ] = relevance
-
-        try:
-
-            evaluation_results = evaluate(
-                ranked_ids=ranked_resume_ids,
-                relevance_map=proxy_relevance_map,
-                k=top_n
-            )
-
-            st.subheader(
-                f"📈 Automatic Evaluation Metrics @ {top_n}"
-            )
-
-            metric_col1, metric_col2, metric_col3 = (
-                st.columns(3)
-            )
-
-            with metric_col1:
-
-                st.metric(
-                    f"Precision@{top_n}",
-                    f"{evaluation_results[f'Precision@{top_n}'] * 100:.1f}%"
-                )
-
-            with metric_col2:
-
-                st.metric(
-                    f"Recall@{top_n}",
-                    f"{evaluation_results[f'Recall@{top_n}'] * 100:.1f}%"
-                )
-
-            with metric_col3:
-
-                st.metric(
-                    f"NDCG@{top_n}",
-                    f"{evaluation_results[f'NDCG@{top_n}'] * 100:.1f}%"
-                )
-
-            st.caption(
-                "Automatic proxy evaluation based on requirement coverage, "
-                "skill coverage, and structured filter signals. "
-                "These are proxy metrics, not human-labeled ground-truth metrics."
-            )
-
-        except Exception as evaluation_error:
-
-            st.warning(
-                f"Evaluation metrics could not be calculated: "
-                f"{evaluation_error}"
-            )
-
-        # ====================================================
         # RANKING TABLE
         # ====================================================
 
@@ -1011,27 +861,21 @@ if "all_jd_results" in st.session_state:
         )
 
         with header[0]:
-
             st.write("**Rank**")
 
         with header[1]:
-
             st.write("**Candidate**")
 
         with header[2]:
-
             st.write("**Retrieval Score**")
 
         with header[3]:
-
             st.write("**Re-ranking Score**")
 
         with header[4]:
-
             st.write("**Filter Score**")
 
         with header[5]:
-
             st.write("**Final Score**")
 
         for result in displayed_results:

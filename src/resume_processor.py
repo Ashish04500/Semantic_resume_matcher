@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from src.parser import extract_text
+from src.matching.filtering import extract_years_from_text
 
 
 class ResumeProcessor:
@@ -14,7 +15,6 @@ class ResumeProcessor:
         )
 
         if not text.strip():
-
             raise ValueError(
                 f"No text could be extracted "
                 f"from: {path.name}"
@@ -25,11 +25,9 @@ class ResumeProcessor:
             "filename": path.name,
             "raw_text": text,
 
-            # We don't need Gemini for ranking.
-            # Keep this available for future
-            # structured extraction.
+            # Extract candidate experience from resume text.
             "structured_data": {
-                "total_years_experience": None
+                "total_years_experience": extract_years_from_text(text)
             }
         }
 

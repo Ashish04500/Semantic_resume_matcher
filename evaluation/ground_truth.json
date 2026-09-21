@@ -1,0 +1,22 @@
+[
+  {
+    "job_id": "JD001",
+    "resume_id": "RES001",
+    "relevance": 3
+  },
+  {
+    "job_id": "JD001",
+    "resume_id": "RES002",
+    "relevance": 2
+  },
+  {
+    "job_id": "JD001",
+    "resume_id": "RES003",
+    "relevance": 1
+  },
+  {
+    "job_id": "JD001",
+    "resume_id": "RES004",
+    "relevance": 0
+  }
+]

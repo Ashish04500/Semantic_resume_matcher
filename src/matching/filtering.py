@@ -1,8 +1,56 @@
+import re
+
+
+def extract_years_from_text(text: str):
+    """
+    Extract experience years from resume text.
+
+    Examples:
+    '2 years of experience' -> 2.0
+    '2+ years experience' -> 2.0
+    '3 yrs of experience' -> 3.0
+    'at least 2 years' -> 2.0
+    """
+
+    if not text:
+        return None
+
+    text = text.lower()
+
+    patterns = [
+        r"(\d+(?:\.\d+)?)\s*\+?\s*years?\s+(?:of\s+)?(?:relevant\s+|professional\s+|work\s+|software\s+)?experience",
+        r"(\d+(?:\.\d+)?)\s*\+?\s*yrs?\s+(?:of\s+)?(?:relevant\s+|professional\s+|work\s+)?experience",
+        r"(?:minimum|at least)\s+(\d+(?:\.\d+)?)\s*\+?\s*years?",
+    ]
+
+    values = []
+
+    for pattern in patterns:
+
+        matches = re.findall(
+            pattern,
+            text
+        )
+
+        for value in matches:
+
+            try:
+                values.append(float(value))
+            except ValueError:
+                pass
+
+    if not values:
+        return None
+
+    return max(values)
+
+
 class FilterScorer:
 
     def score(self, jd_data, resume_data):
 
         scores = []
+
         details = {}
 
         # -----------------------------------------
@@ -36,16 +84,29 @@ class FilterScorer:
 
         else:
 
-            experience_score = 0.0
+            # Partial experience score.
+            # Example: 2 years / 3 years = 0.667
+            experience_score = (
+                candidate_years / required_years
+            )
+
             experience_status = "Below Requirement"
 
         scores.append(experience_score)
 
         details["experience"] = {
-            "required_years": required_years,
-            "candidate_years": candidate_years,
-            "status": experience_status,
-            "score": experience_score
+
+            "required_years":
+                required_years,
+
+            "candidate_years":
+                candidate_years,
+
+            "status":
+                experience_status,
+
+            "score":
+                experience_score
         }
 
         # -----------------------------------------
@@ -103,6 +164,7 @@ class FilterScorer:
         scores.append(certification_score)
 
         details["certifications"] = {
+
             "required":
                 required_certifications,
 
@@ -127,6 +189,10 @@ class FilterScorer:
         )
 
         return {
-            "filter_score": filter_score,
-            "details": details
+
+            "filter_score":
+                filter_score,
+
+            "details":
+                details
         }
