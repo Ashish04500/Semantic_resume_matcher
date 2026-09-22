@@ -11,11 +11,6 @@ from src.resume_processor import ResumeProcessor
 from src.matching.pipeline import MatchingPipeline
 from evaluation.evaluate import evaluate
 
-from fairness.fairness_audit import (
-    mask_resume,
-    run_fairness_audit
-)
-
 
 # ============================================================
 # PAGE CONFIG
@@ -759,10 +754,6 @@ if jd_files and resume_files:
         ] = all_jd_results
 
         st.session_state[
-            "successful_resumes"
-        ] = successful_resumes
-
-        st.session_state[
             "original_file_bytes"
         ] = original_file_bytes
 
@@ -860,113 +851,64 @@ if "all_jd_results" in st.session_state:
         )
 
         # ====================================================
-        # AUTOMATIC PROXY EVALUATION
+        # EVALUATION LABELS
         # ====================================================
-        # No manual relevance labels are required.
-        #
-        # A proxy relevance score is generated from signals
-        # already produced by the matching pipeline:
-        #
-        # - requirement coverage
-        # - skill coverage
-        # - structured filter score
-        #
-        # These metrics are proxy evaluation metrics and are
-        # not human-labeled ground-truth evaluation.
+        # Relevance labels are supplied by the evaluator for
+        # the actual uploaded resumes. No resume IDs are hardcoded.
+
+        st.subheader("📝 Evaluation Labels")
+
+        st.caption(
+            "Assign a relevance label to each candidate: "
+            "3 = Highly Relevant, 2 = Relevant, "
+            "1 = Partially Relevant, 0 = Not Relevant."
+        )
+
+        relevance_map = {}
+
+        for result in results:
+
+            resume_id = result["resume_id"]
+            filename = result["filename"]
+
+            label_key = (
+                f"relevance_{jd_number}_{resume_id}"
+            )
+
+            relevance_map[resume_id] = st.selectbox(
+                f"{filename}",
+                options=[3, 2, 1, 0],
+                index=0,
+                key=label_key,
+                format_func=lambda value: {
+                    3: "3 — Highly Relevant",
+                    2: "2 — Relevant",
+                    1: "1 — Partially Relevant",
+                    0: "0 — Not Relevant"
+                }[value]
+            )
+
+        # ====================================================
+        # EVALUATION METRICS
+        # ====================================================
+        # K comes directly from the user's Streamlit selection.
+        # The evaluation module does not decide K itself.
 
         ranked_resume_ids = [
             result["resume_id"]
             for result in results
         ]
 
-        proxy_relevance_map = {}
-
-        for result in results:
-
-            skill_coverage = (
-                float(
-                    result.get(
-                        "skill_coverage",
-                        0.0
-                    )
-                ) / 100.0
-            )
-
-            matched_requirements = result.get(
-                "matched_requirements",
-                []
-            )
-
-            unmatched_requirements = result.get(
-                "unmatched_requirements",
-                []
-            )
-
-            total_requirements = (
-                len(matched_requirements)
-                + len(unmatched_requirements)
-            )
-
-            if total_requirements > 0:
-
-                requirement_coverage = (
-                    len(matched_requirements)
-                    / total_requirements
-                )
-
-            else:
-
-                requirement_coverage = (
-                    skill_coverage
-                )
-
-            filter_score = float(
-                result.get(
-                    "filter_score",
-                    0.0
-                )
-            )
-
-            # IMPORTANT:
-            # This proxy does not directly use final_score.
-            # It uses underlying matching signals instead.
-
-            proxy_score = (
-                0.45 * requirement_coverage
-                + 0.35 * skill_coverage
-                + 0.20 * filter_score
-            )
-
-            if proxy_score >= 0.75:
-
-                relevance = 3
-
-            elif proxy_score >= 0.50:
-
-                relevance = 2
-
-            elif proxy_score >= 0.25:
-
-                relevance = 1
-
-            else:
-
-                relevance = 0
-
-            proxy_relevance_map[
-                result["resume_id"]
-            ] = relevance
-
         try:
 
             evaluation_results = evaluate(
                 ranked_ids=ranked_resume_ids,
-                relevance_map=proxy_relevance_map,
+                relevance_map=relevance_map,
                 k=top_n
             )
 
             st.subheader(
-                f"📈 Automatic Evaluation Metrics @ {top_n}"
+                f"📈 Evaluation Metrics @ {top_n}"
             )
 
             metric_col1, metric_col2, metric_col3 = (
@@ -995,9 +937,8 @@ if "all_jd_results" in st.session_state:
                 )
 
             st.caption(
-                "Automatic proxy evaluation based on requirement coverage, "
-                "skill coverage, and structured filter signals. "
-                "These are proxy metrics, not human-labeled ground-truth metrics."
+                f"Metrics calculated using the same K={top_n} selected above "
+                "and the relevance labels provided for the uploaded candidates."
             )
 
         except Exception as evaluation_error:
@@ -1005,219 +946,6 @@ if "all_jd_results" in st.session_state:
             st.warning(
                 f"Evaluation metrics could not be calculated: "
                 f"{evaluation_error}"
-            )
-
-        # ====================================================
-        # FAIRNESS AUDIT
-        # ====================================================
-
-        st.subheader(
-            "⚖️ Fairness Audit"
-        )
-
-        st.caption(
-            "Masks demographic-correlated information from the actual "
-            "uploaded resumes and reruns the same matching pipeline. "
-            "The audit compares ranking sensitivity and does not modify "
-            "the original candidate scores or ranking."
-        )
-
-        successful_resumes = st.session_state.get(
-            "successful_resumes",
-            []
-        )
-
-        if successful_resumes:
-
-            run_fairness = st.button(
-                "🔍 Run Fairness Audit",
-                key=f"fairness_{jd_number}"
-            )
-
-            if run_fairness:
-
-                with st.spinner(
-                    "Running masked fairness audit..."
-                ):
-
-                    masked_resumes = []
-
-                    for resume in successful_resumes:
-
-                        masked_resume = resume.copy()
-
-                        masked_resume["raw_text"] = mask_resume(
-                            resume.get("raw_text", "")
-                        )
-
-                        if "structured_data" in resume:
-
-                            masked_resume["structured_data"] = (
-                                resume["structured_data"].copy()
-                            )
-
-                        masked_resumes.append(
-                            masked_resume
-                        )
-
-                    fairness_pipeline = MatchingPipeline()
-
-                    masked_results = fairness_pipeline.match(
-                        jd_text=jd_result["jd_text"],
-                        jd_data=jd_result["jd_data"],
-                        resumes=masked_resumes,
-                        retrieval_top_k=len(masked_resumes)
-                    )
-
-                    original_ranking = [
-                        result["resume_id"]
-                        for result in results
-                    ]
-
-                    masked_ranking = [
-                        result["resume_id"]
-                        for result in masked_results
-                    ]
-
-                    fairness_report = run_fairness_audit(
-                        original_ranking=original_ranking,
-                        masked_ranking=masked_ranking,
-                        k=min(
-                            top_n,
-                            len(original_ranking)
-                        )
-                    )
-
-                st.success(
-                    "Fairness audit completed using the actual uploaded resumes."
-                )
-
-                # Map internal temporary resume IDs back to the
-                # original uploaded resume filenames for display.
-                resume_name_map = {
-                    resume.get("resume_id"): resume.get(
-                        "filename",
-                        resume.get(
-                            "resume_id",
-                            "Unknown Resume"
-                        )
-                    )
-                    for resume in successful_resumes
-                }
-
-                fairness_col1, fairness_col2, fairness_col3 = (
-                    st.columns(3)
-                )
-
-                with fairness_col1:
-
-                    st.metric(
-                        "Kendall's Tau",
-                        f"{fairness_report['kendall_tau']:.3f}"
-                    )
-
-                with fairness_col2:
-
-                    st.metric(
-                        "Spearman's Rho",
-                        f"{fairness_report['spearman_rho']:.3f}"
-                    )
-
-                with fairness_col3:
-
-                    selection_difference = (
-                        fairness_report[
-                            "top_k_selection"
-                        ][
-                            "selection_difference"
-                        ]
-                    )
-
-                    st.metric(
-                        "Top-K Selection Difference",
-                        f"{selection_difference * 100:.1f}%"
-                    )
-
-                top_k_data = fairness_report[
-                    "top_k_selection"
-                ]
-
-                original_top_k = top_k_data[
-                    "original_top_k"
-                ]
-
-                masked_top_k = top_k_data[
-                    "masked_top_k"
-                ]
-
-                overlap_count = top_k_data[
-                    "overlap_count"
-                ]
-
-                st.write(
-                    f"**Top-{min(top_n, len(original_ranking))} "
-                    f"overlap:** {overlap_count} candidate(s)"
-                )
-
-                with st.expander(
-                    "View Original vs Masked Ranking"
-                ):
-
-                    ranking_col1, ranking_col2 = (
-                        st.columns(2)
-                    )
-
-                    with ranking_col1:
-
-                        st.write(
-                            "**Original Ranking**"
-                        )
-
-                        for position, resume_id in enumerate(
-                            original_top_k,
-                            start=1
-                        ):
-
-                            display_name = resume_name_map.get(
-                                resume_id,
-                                resume_id
-                            )
-
-                            st.write(
-                                f"{position}. {display_name}"
-                            )
-
-                    with ranking_col2:
-
-                        st.write(
-                            "**Masked Ranking**"
-                        )
-
-                        for position, resume_id in enumerate(
-                            masked_top_k,
-                            start=1
-                        ):
-
-                            display_name = resume_name_map.get(
-                                resume_id,
-                                resume_id
-                            )
-
-                            st.write(
-                                f"{position}. {display_name}"
-                            )
-
-                st.info(
-                    "Fairness audit only — masking is used to measure "
-                    "ranking sensitivity. The original ranking and "
-                    "candidate scores are not modified."
-                )
-
-        else:
-
-            st.warning(
-                "Fairness audit could not run because the processed "
-                "resume data is unavailable."
             )
 
         # ====================================================

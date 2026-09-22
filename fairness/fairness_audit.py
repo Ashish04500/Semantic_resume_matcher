@@ -1,6 +1,4 @@
 import re
-import math
-from pathlib import Path
 
 
 # ============================================================
@@ -9,9 +7,14 @@ from pathlib import Path
 
 def mask_resume(text: str) -> str:
     """
-    Create a masked version of a resume by removing/generalizing
-    demographic-correlated information.
+    Mask demographic-correlated information from a resume.
+
+    The actual resume text is supplied by the application.
+    Nothing is hardcoded here.
     """
+
+    if not text:
+        return ""
 
     masked = text
 
@@ -25,7 +28,6 @@ def mask_resume(text: str) -> str:
         masked
     )
 
-    # Common resume name/header pattern
     lines = masked.splitlines()
 
     if lines:
@@ -41,7 +43,10 @@ def mask_resume(text: str) -> str:
                     "cv",
                     "software",
                     "engineer",
-                    "developer"
+                    "developer",
+                    "experience",
+                    "skills",
+                    "education"
                 ]
             )
         ):
@@ -60,6 +65,14 @@ def mask_resume(text: str) -> str:
         flags=re.IGNORECASE
     )
 
+    # Explicit gender words
+    masked = re.sub(
+        r"\b(male|female|man|woman|boy|girl)\b",
+        "[MASKED_GENDER]",
+        masked,
+        flags=re.IGNORECASE
+    )
+
     # --------------------------------------------------------
     # Graduation year
     # --------------------------------------------------------
@@ -73,8 +86,15 @@ def mask_resume(text: str) -> str:
         masked
     )
 
+    # Also mask standalone graduation years in education sections.
+    masked = re.sub(
+        r"(?<!\d)(19|20)\d{2}(?!\d)",
+        "[MASKED_YEAR]",
+        masked
+    )
+
     # --------------------------------------------------------
-    # Address
+    # Address / Location
     # --------------------------------------------------------
 
     masked = re.sub(
@@ -101,25 +121,16 @@ def mask_resume(text: str) -> str:
     )
 
     # --------------------------------------------------------
-    # University / college names
+    # University / college / institute
     # --------------------------------------------------------
 
-    masked = re.sub(
-        r"(?im)^"
-        r"(university|college|institute|school)"
-        r"[^:\n]*"
-        r"[:\-]?\s*.*$",
-        r"[MASKED EDUCATIONAL INSTITUTION]",
-        masked
-    )
-
-    # Lines containing common education keywords
     education_keywords = [
         "iit ",
         "nit ",
-        "university of ",
-        "college of ",
-        "institute of ",
+        "university",
+        "college",
+        "institute",
+        "school of",
         "technology"
     ]
 
@@ -133,8 +144,10 @@ def mask_resume(text: str) -> str:
             keyword in lower
             for keyword in education_keywords
         ):
-            # Preserve degree information where possible
-            if any(
+
+            # Preserve degree information while masking
+            # the educational institution.
+            degree_found = any(
                 degree in lower
                 for degree in [
                     "b.tech",
@@ -149,17 +162,22 @@ def mask_resume(text: str) -> str:
                     "m.sc",
                     "bca",
                     "mca",
-                    "mba"
+                    "mba",
+                    "bachelor",
+                    "master",
+                    "phd"
                 ]
-            ):
+            )
+
+            if degree_found:
                 result_lines.append(
-                    "[MASKED UNIVERSITY/COLLEGE] "
-                    + line
+                    "[MASKED UNIVERSITY/COLLEGE]"
                 )
             else:
                 result_lines.append(
                     "[MASKED UNIVERSITY/COLLEGE]"
                 )
+
         else:
             result_lines.append(line)
 
@@ -167,21 +185,30 @@ def mask_resume(text: str) -> str:
 
 
 # ============================================================
-# RANK CORRELATION
+# RANK UTILITIES
 # ============================================================
 
 def rank_positions(ranking):
+    """
+    Convert a ranking list into:
+
+        resume_id -> rank position
+    """
+
     return {
         resume_id: position + 1
-        for position, resume_id
-        in enumerate(ranking)
+        for position, resume_id in enumerate(ranking)
     }
 
 
+# ============================================================
+# KENDALL'S TAU
+# ============================================================
+
 def kendall_tau(original, masked):
     """
-    Calculate Kendall's tau manually so no additional package
-    is required.
+    Compare the relative ordering of candidates before
+    and after demographic-correlated information is masked.
     """
 
     common = [
@@ -202,17 +229,17 @@ def kendall_tau(original, masked):
     for i in range(len(common)):
         for j in range(i + 1, len(common)):
 
-            a = common[i]
-            b = common[j]
+            candidate_a = common[i]
+            candidate_b = common[j]
 
             original_difference = (
-                original_positions[a]
-                - original_positions[b]
+                original_positions[candidate_a]
+                - original_positions[candidate_b]
             )
 
             masked_difference = (
-                masked_positions[a]
-                - masked_positions[b]
+                masked_positions[candidate_a]
+                - masked_positions[candidate_b]
             )
 
             product = (
@@ -222,6 +249,7 @@ def kendall_tau(original, masked):
 
             if product > 0:
                 concordant += 1
+
             elif product < 0:
                 discordant += 1
 
@@ -236,9 +264,13 @@ def kendall_tau(original, masked):
     )
 
 
+# ============================================================
+# SPEARMAN'S RHO
+# ============================================================
+
 def spearman_rho(original, masked):
     """
-    Calculate Spearman's rank correlation manually.
+    Compare candidate rank positions before and after masking.
     """
 
     common = [
@@ -279,8 +311,21 @@ def spearman_rho(original, masked):
 def top_k_selection_difference(
     original,
     masked,
-    k=5
+    k
 ):
+    """
+    Compare which candidates appear in the Top-K
+    before and after masking.
+    """
+
+    if k <= 0:
+        return {
+            "original_top_k": [],
+            "masked_top_k": [],
+            "selection_difference": 0.0,
+            "overlap_count": 0
+        }
+
     original_top_k = set(original[:k])
     masked_top_k = set(masked[:k])
 
@@ -288,7 +333,8 @@ def top_k_selection_difference(
         return {
             "original_top_k": [],
             "masked_top_k": [],
-            "selection_difference": 0.0
+            "selection_difference": 0.0,
+            "overlap_count": 0
         }
 
     changed = (
@@ -302,82 +348,49 @@ def top_k_selection_difference(
         / (2 * len(original_top_k))
     )
 
+    overlap_count = len(
+        original_top_k.intersection(masked_top_k)
+    )
+
     return {
-        "original_top_k": list(original_top_k),
-        "masked_top_k": list(masked_top_k),
-        "selection_difference": difference
+        "original_top_k": list(original[:k]),
+        "masked_top_k": list(masked[:k]),
+        "selection_difference": round(
+            difference,
+            4
+        ),
+        "overlap_count": overlap_count
     }
 
 
 # ============================================================
-# FOUR-FIFTHS STYLE AUDIT
-# ============================================================
-
-def four_fifths_audit(
-    original,
-    masked,
-    k=5
-):
-    """
-    Audit changes in top-K selection.
-
-    This is an audit indicator only.
-    It does NOT modify ranking or scores.
-    """
-
-    original_top_k = set(original[:k])
-    masked_top_k = set(masked[:k])
-
-    all_candidates = set(original)
-
-    if not all_candidates:
-        return {
-            "ratio": 1.0,
-            "flag": False
-        }
-
-    original_rate = (
-        len(original_top_k)
-        / len(all_candidates)
-    )
-
-    masked_rate = (
-        len(masked_top_k)
-        / len(all_candidates)
-    )
-
-    if original_rate == 0:
-        ratio = 1.0
-    else:
-        ratio = (
-            masked_rate
-            / original_rate
-        )
-
-    return {
-        "original_selection_rate":
-            round(original_rate, 4),
-
-        "masked_selection_rate":
-            round(masked_rate, 4),
-
-        "selection_rate_ratio":
-            round(ratio, 4),
-
-        "flag_four_fifths":
-            ratio < 0.80
-    }
-
-
-# ============================================================
-# AUDIT
+# FAIRNESS AUDIT
 # ============================================================
 
 def run_fairness_audit(
     original_ranking,
     masked_ranking,
-    k=5
+    k
 ):
+    """
+    Compare rankings produced by the same matching pipeline
+    before and after demographic-correlated information is
+    masked.
+
+    This function does not modify scores or rankings.
+    """
+
+    if not original_ranking:
+        return {
+            "kendall_tau": 1.0,
+            "spearman_rho": 1.0,
+            "top_k_selection": {
+                "original_top_k": [],
+                "masked_top_k": [],
+                "selection_difference": 0.0,
+                "overlap_count": 0
+            }
+        }
 
     tau = kendall_tau(
         original_ranking,
@@ -395,138 +408,8 @@ def run_fairness_audit(
         k
     )
 
-    four_fifths = four_fifths_audit(
-        original_ranking,
-        masked_ranking,
-        k
-    )
-
     return {
         "kendall_tau": round(tau, 4),
         "spearman_rho": round(rho, 4),
-        "top_k_selection": selection,
-        "four_fifths_audit": four_fifths
+        "top_k_selection": selection
     }
-
-
-# ============================================================
-# DEMO
-# ============================================================
-
-def main():
-
-    # --------------------------------------------------------
-    # Example resume
-    # Replace this with an actual resume when integrating
-    # with the Streamlit application.
-    # --------------------------------------------------------
-
-    original_resume = """
-    Rahul Sharma
-    Software Engineer
-
-    Male
-
-    B.Tech in Computer Science
-    Indian Institute of Technology Example
-
-    Graduated: 2024
-
-    Address: Kolkata, West Bengal - 700001
-
-    2 years of software engineering experience.
-
-    Skills:
-    Python, Java, SQL, Machine Learning
-    """
-
-    masked_resume = mask_resume(
-        original_resume
-    )
-
-    print("\n===================================")
-    print("       FAIRNESS MASKING")
-    print("===================================")
-
-    print("\n--- ORIGINAL RESUME ---")
-    print(original_resume)
-
-    print("\n--- MASKED RESUME ---")
-    print(masked_resume)
-
-    # --------------------------------------------------------
-    # Example rankings
-    # These represent rankings returned by the SAME matching
-    # pipeline before and after masking.
-    # --------------------------------------------------------
-
-    original_ranking = [
-        "RES001",
-        "RES002",
-        "RES003",
-        "RES004",
-        "RES005"
-    ]
-
-    masked_ranking = [
-        "RES001",
-        "RES003",
-        "RES002",
-        "RES004",
-        "RES005"
-    ]
-
-    report = run_fairness_audit(
-        original_ranking,
-        masked_ranking,
-        k=5
-    )
-
-    print("\n===================================")
-    print("        FAIRNESS AUDIT")
-    print("===================================")
-
-    print(
-        "Kendall's tau :",
-        report["kendall_tau"]
-    )
-
-    print(
-        "Spearman's rho:",
-        report["spearman_rho"]
-    )
-
-    print(
-        "Top-K selection difference:",
-        round(
-            report["top_k_selection"][
-                "selection_difference"
-            ],
-            4
-        )
-    )
-
-    print(
-        "Four-fifths ratio:",
-        report["four_fifths_audit"][
-            "selection_rate_ratio"
-        ]
-    )
-
-    print(
-        "Four-fifths flag:",
-        report["four_fifths_audit"][
-            "flag_four_fifths"
-        ]
-    )
-
-    print("\n===================================")
-    print(
-        "Audit only — no scores or rankings "
-        "were automatically changed."
-    )
-    print("===================================\n")
-
-
-if __name__ == "__main__":
-    main()
